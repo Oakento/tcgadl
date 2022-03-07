@@ -3,15 +3,23 @@
 Download TCGA files(faster than gdc-client)
 
 ### Usage
+download TCGA-LUSC and TCGA-LUAD to ./tcga/
+
 `tcgadl dl --proj TCGA-LUSC --proj TCGA-LUAD --dir ./tcga/`
+
+download all TCGA projects
+
 `tcgadl dl --all`
 
 
-##### subcommand `dl`
+#### subcommand `dl`
 `--proj`: TCGA project to download
+
 `--all`: download all TCGA projects(shown in the table below)
+
 `--dir`: specify downloading directory(default `$HOME/tcgadl`)
-##### effective environment variables
+
+#### effective environment variables
 `$HTTP_PROXY` `$HOME`
 
 
