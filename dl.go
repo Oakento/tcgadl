@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -40,8 +39,105 @@ type Params struct {
 	Size    string `url:"size"`
 }
 
-func filter(proj string) *Filter {
-	return &Filter{
+type Metadata struct {
+	Data struct {
+		Hits []struct {
+			ID       string `json:"id"`
+			Md5Sum   string `json:"md5sum"`
+			Entities []struct {
+				Barcode string `json:"entity_submitter_id"`
+			} `json:"associated_entities"`
+		} `json:"hits"`
+		Pagination struct {
+			Count int `json:"count"`
+			Total int `json:"total"`
+			From  int `json:"from"`
+			Page  int `json:"page"`
+			Pages int `json:"pages"`
+		} `json:"pagination"`
+	} `json:"data"`
+	Project string
+}
+
+type Manifest struct {
+	FileID string `json:"file_id"`
+	TCGA   string `json:"TCGA_barcode"`
+}
+
+var Client *http.Client
+
+func initClient() *http.Client {
+	if Proxy == "" {
+		return &http.Client{}
+	}
+	proxyURL, err := url.ParseRequestURI(Proxy)
+	if err != nil {
+		fmt.Printf(`Proxy URL "%s" is invalid. Use direct connection instead.\n`, Proxy)
+		return &http.Client{}
+	}
+	fmt.Println("Connecting to https://api.gdc.cancer.gov via", Proxy)
+	return &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyURL(proxyURL),
+		},
+	}
+
+}
+
+func download(fileIds []string, manifest []Manifest, proj string) {
+	payload, _ := json.Marshal(url.Values{"ids": fileIds})
+
+	req, _ := http.NewRequest("POST", DATA_EP, bytes.NewBuffer(payload))
+	req.Header.Set("Content-Type", "application/json")
+	// req.Header.Set("Range", "bytes=0-")
+	// req.Header.Set("Host", "api.gdc.cancer.gov")
+	resp, err := Client.Do(req)
+	if err != nil {
+		fmt.Println("Error sending request. Check your network connection and proxy settings.")
+		os.Exit(1)
+	}
+	// resp, _ := http.PostForm(DATA_EP, url.Values{"ids": fileIds})
+	// fileSize, _ := strconv.Atoi(resp.Header.Get("Content-Length"))
+	defer resp.Body.Close()
+
+	err = os.MkdirAll(DlDir, os.ModePerm)
+	if err != nil {
+		fmt.Println("Error create directories. Check your permissions.")
+		os.Exit(1)
+	}
+	target, _ := os.Create(path.Join(DlDir, proj+".tmp"))
+	defer target.Close()
+
+	fmt.Print("\n")
+	bar := progressbar.DefaultBytes(-1, "Downloading "+proj)
+
+	_, err = io.Copy(io.MultiWriter(target, bar), resp.Body)
+	if err != nil {
+		target.Close()
+		os.Remove(path.Join(DlDir, proj+".tmp"))
+		fmt.Println("Error writing file to directory. Check your permissions.")
+		os.Exit(1)
+	}
+	target.Close()
+	_ = os.Rename(path.Join(DlDir, proj+".tmp"), path.Join(DlDir, proj+".tar.gz"))
+
+	_ = os.MkdirAll(path.Join(DlDir, "manifest"), os.ModePerm)
+	manifestOut, _ := os.Create(path.Join(DlDir, "manifest", proj+".csv"))
+	defer manifestOut.Close()
+
+	manifestWriter := csv.NewWriter(manifestOut)
+	_ = manifestWriter.Write([]string{"file_id", "TCGA_manifest"})
+	for _, record := range manifest {
+		_ = manifestWriter.Write([]string{
+			record.FileID, record.TCGA,
+		})
+	}
+	manifestWriter.Flush()
+
+}
+
+func fetchInfo(proj string) *Metadata {
+	filterJSON, _ := json.Marshal(&Filter{
 		Op: "and",
 		Content: []Content{
 			{
@@ -66,124 +162,67 @@ func filter(proj string) *Filter {
 				},
 			},
 		},
-	}
-}
-
-func fetchInfo(proj string, client *http.Client, ch chan map[string]interface{}) {
-	filterJSON, _ := json.Marshal(filter(proj))
-	params := Params{
+	})
+	params, _ := query.Values(Params{
 		Filters: string(filterJSON),
-		Fields:  strings.Join(FIELDS, `,`),
-		Format:  "JSON",
-		Size:    "1000000",
-	}
-
-	paramsStr, _ := query.Values(params)
-	reqUrl := FILES_EP + "?" + paramsStr.Encode()
+		Fields: strings.Join([]string{
+			// "file_name",
+			"md5sum",
+			"associated_entities.entity_submitter_id",
+			// "associated_entities.case_id",
+		}, `,`),
+		Format: "JSON",
+		Size:   "1000000",
+	})
+	reqUrl := FILES_EP + "?" + params.Encode()
 
 	req, _ := http.NewRequest("GET", reqUrl, nil)
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := client.Do(req)
+	resp, err := Client.Do(req)
 	if err != nil {
-		log.Panic("Error sending request:", err)
+		fmt.Println("Error sending request. Check your network connection and proxy settings.")
+		os.Exit(1)
 	}
 	defer resp.Body.Close()
+
 	bodyBytes, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		log.Println("Error reading response body:", err)
+		fmt.Println("GDC service may not operating normally. Please try again later.")
+		os.Exit(1)
 	}
-	metadata := make(map[string]interface{})
+	var metadata Metadata
 	_ = json.Unmarshal(bodyBytes, &metadata)
-	metadata["project"] = proj
-	ch <- metadata
+	metadata.Project = proj
+	return &metadata
 }
 
-func download(fileIds []string, manifest []map[string]string, dir string, proj string, client *http.Client) {
-	payload, _ := json.Marshal(url.Values{"ids": fileIds})
+func HandleDl(projects []string) {
 
-	req, _ := http.NewRequest("POST", DATA_EP, bytes.NewBuffer(payload))
-	req.Header.Set("Content-Type", "application/json")
-	// req.Header.Set("Range", "bytes=0-")
-	// req.Header.Set("Host", "api.gdc.cancer.gov")
-	resp, err := client.Do(req)
-	if err != nil {
-		log.Panic("Error sending request:", err)
-	}
-	// resp, _ := http.PostForm(DATA_EP, url.Values{"ids": fileIds})
-	// fileSize, _ := strconv.Atoi(resp.Header.Get("Content-Length"))
-	defer resp.Body.Close()
+	Client = initClient()
 
-	err = os.MkdirAll(dir, os.ModePerm)
-	if err != nil {
-		log.Panic(err)
-	}
-	target, _ := os.Create(path.Join(dir, proj+".tmp"))
-	defer target.Close()
+	ch := make(chan *Metadata, len(projects))
 
-	fmt.Print("\n")
-	bar := progressbar.DefaultBytes(-1, "Downloading "+proj)
-
-	_, err = io.Copy(io.MultiWriter(target, bar), resp.Body)
-	if err != nil {
-		target.Close()
-		os.Remove(path.Join(dir, proj+".tmp"))
-		log.Panic("Error writing file to directory:", err)
-	}
-	target.Close()
-	_ = os.Rename(path.Join(dir, proj+".tmp"), path.Join(dir, proj+".tar.gz"))
-
-	_ = os.MkdirAll(path.Join(dir, "manifest"), os.ModePerm)
-	manifestOut, _ := os.Create(path.Join(dir, "manifest", proj+".csv"))
-	defer manifestOut.Close()
-
-	manifestWriter := csv.NewWriter(manifestOut)
-	_ = manifestWriter.Write([]string{"file_id", "TCGA_manifest"})
-	for _, record := range manifest {
-		_ = manifestWriter.Write([]string{
-			record["file_id"], record["TCGA_barcode"],
-		})
-	}
-	manifestWriter.Flush()
-
-}
-
-func DownloadMany(projects []string, dir string) {
-	var client *http.Client
-	if HTTP_PROXY != "" {
-		proxyURL, err := url.Parse(HTTP_PROXY)
-		if err != nil {
-			log.Println("Proxy URL is invalid:", err)
-			os.Exit(1)
-		}
-		client = &http.Client{
-			Transport: &http.Transport{
-				Proxy: http.ProxyURL(proxyURL),
-			},
-		}
-	} else {
-		client = &http.Client{}
+	for _, proj := range projects {
+		go func(proj string) {
+			fmt.Printf("%s: Collecting info...\n", proj)
+			ch <- fetchInfo(proj)
+		}(proj)
 	}
 
-	chs := make([]chan map[string]interface{}, len(projects))
-	for i, proj := range projects {
-		chs[i] = make(chan map[string]interface{})
-		go fetchInfo(proj, client, chs[i])
-		fmt.Printf("%s: Collecting metadata...\n", proj)
-	}
-
-	for _, ch := range chs {
+	for i := 0; i < len(projects); i++ {
 		metadata := <-ch
-		files := metadata["data"].(map[string]interface{})["hits"].([]interface{})
+		files := metadata.Data.Hits
 		fileIds := make([]string, 0)
-		manifest := make([]map[string]string, 0)
+		manifest := make([]Manifest, 0)
 		for _, file := range files {
-			fileIds = append(fileIds, file.(map[string]interface{})["id"].(string))
-			manifest = append(manifest, map[string]string{
-				"file_id":      file.(map[string]interface{})["id"].(string),
-				"TCGA_barcode": file.(map[string]interface{})["associated_entities"].([]interface{})[0].(map[string]interface{})["entity_submitter_id"].(string),
+			fileIds = append(fileIds, file.ID)
+			manifest = append(manifest, Manifest{
+				FileID: file.ID,
+				TCGA:   file.Entities[0].Barcode,
 			})
 		}
-		download(fileIds, manifest, dir, metadata["project"].(string), client)
+		download(fileIds, manifest, metadata.Project)
 	}
+	close(ch)
 
 }
