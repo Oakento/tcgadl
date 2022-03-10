@@ -14,6 +14,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/google/go-querystring/query"
@@ -48,6 +49,15 @@ type Metadata struct {
 			ID       string `json:"id"`
 			Md5sum   string `json:"md5sum"`
 			FileName string `json:"file_name"`
+			Cases    []struct {
+				Diagnoses []struct {
+					DaysToLastFollowUp int `json:"days_to_last_follow_up"`
+				} `json:"diagnoses"`
+				Demographic struct {
+					VitalStatus string `json:"vital_status"`
+					DaysToDeath int    `json:"days_to_death"`
+				} `json:"demographic"`
+			} `json:"cases"`
 			Entities []struct {
 				Barcode string `json:"entity_submitter_id"`
 			} `json:"associated_entities"`
@@ -64,10 +74,13 @@ type Metadata struct {
 }
 
 type Manifest struct {
-	FileID   string `json:"file_id"`
-	FileName string `json:"file_name"`
-	TCGA     string `json:"TCGA_barcode"`
-	Md5sum   string `json:"md5sum"`
+	FileID             string `json:"file_id"`
+	FileName           string `json:"file_name"`
+	TCGA               string `json:"TCGA_barcode"`
+	Md5sum             string `json:"md5sum"`
+	VitalStatus        string `json:"vital_status"`
+	DaysToDeath        string `json:"days_to_death"`
+	DaysToLastFollowUp string `json:"days_to_last_follow_up"`
 }
 
 var Client *http.Client
@@ -173,12 +186,15 @@ func writeManifest(proj string, manifest []Manifest) {
 	defer manifestOut.Close()
 
 	manifestWriter := csv.NewWriter(manifestOut)
-	_ = manifestWriter.Write([]string{"file_id", "file_name", "TCGA_manifest"})
+	_ = manifestWriter.Write([]string{"file_id", "file_name", "TCGA_barcode", "vital_status", "days_to_death", "days_to_last_follow_up"})
 	for _, record := range manifest {
 		_ = manifestWriter.Write([]string{
 			record.FileID,
 			record.FileName,
 			record.TCGA,
+			record.VitalStatus,
+			record.DaysToDeath,
+			record.DaysToLastFollowUp,
 		})
 	}
 	manifestWriter.Flush()
@@ -248,6 +264,7 @@ func appendDl(fileIds []string, manifest []Manifest, proj string) {
 
 	if len(reFiles) == 0 {
 		fmt.Println("Nothing changed. All files are already downloaded.")
+		// writeManifest(proj, manifest)
 		return
 	}
 	payload, _ := json.Marshal(url.Values{"ids": reFiles})
@@ -306,13 +323,15 @@ func fetchInfo(proj string) *Metadata {
 			"file_name",
 			"md5sum",
 			"associated_entities.entity_submitter_id",
+			"cases.demographic.vital_status",  // api document gives "cases.diagnoses.days_to_death", but it's not working
+			"cases.demographic.days_to_death", // https://api.gdc.cancer.gov/files/_mapping lists correct field names
+			"cases.diagnoses.days_to_last_follow_up",
 			// "associated_entities.case_id",
 		}, `,`),
 		Format: "JSON",
 		Size:   "1000000",
 	})
 	reqUrl := FILES_EP + "?" + params.Encode()
-
 	req, _ := http.NewRequest("GET", reqUrl, nil)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept-Encoding", "gzip")
@@ -362,11 +381,26 @@ func HandleDl(projects []string) {
 		manifest := make([]Manifest, 0)
 		for _, file := range files {
 			fileIds = append(fileIds, file.ID)
+
+			vital := "unknown"
+			days2D := 0
+			days2LFU := 0
+			if len(file.Cases) > 0 {
+				vital = file.Cases[0].Demographic.VitalStatus
+				days2D = file.Cases[0].Demographic.DaysToDeath
+				if len(file.Cases[0].Diagnoses) > 0 {
+					days2LFU = file.Cases[0].Diagnoses[0].DaysToLastFollowUp
+				}
+			}
+
 			manifest = append(manifest, Manifest{
-				FileID:   file.ID,
-				FileName: file.FileName,
-				TCGA:     file.Entities[0].Barcode,
-				Md5sum:   file.Md5sum,
+				FileID:             file.ID,
+				FileName:           file.FileName,
+				TCGA:               file.Entities[0].Barcode,
+				Md5sum:             file.Md5sum,
+				VitalStatus:        vital,
+				DaysToDeath:        strconv.Itoa(days2D),
+				DaysToLastFollowUp: strconv.Itoa(days2LFU),
 			})
 		}
 		if DlSkip {
