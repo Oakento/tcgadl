@@ -1,8 +1,8 @@
 # tcgadl
 
-Download TCGA files(faster than gdc-client)
+Fast downloading and merging TCGA files
 
-### Usage
+## Usage
 
 
 ```shell
@@ -16,6 +16,8 @@ tcgadl dl --all
 tcgadl dl --all --decompress
 # download all and skip existing files
 tcgadl dl --all --skip
+# merge project data to a table
+tcgadl merge --proj TCGA-LUSC --dir ./tcga/
 ```
 
 #### subcommand `dl`
@@ -27,9 +29,16 @@ tcgadl dl --all --skip
 
 `--decompress`: decompress downloaded files(default `false`)
 
-`--skip`: skip downloaded files(default `false`)
+`--skip`: skip downloaded files(default `false`, will automatically enable `--decompress`)
 
 `--proxy`: use proxy. Having priority over `HTTP_PROXY`
+
+#### subcommand `merge`
+`--proj`: TCGA project to download
+
+`--all`: download all TCGA projects
+
+`--dir`: specify downloading directory(default `$HOME/tcgadl`)
 
 #### subcommand `show`
 Display available TCGA projects.
@@ -37,3 +46,17 @@ Display available TCGA projects.
 
 #### effective environment variables
 `$HTTP_PROXY` `$HOME`
+
+
+## Compilation
+#### Requirements
+`go 1.17`
+
+#### Linux / macOS
+```shell
+go build -o tcgadl -trimpath -ldflags "-s -w -buildid="
+```
+#### Windows
+```shell
+go build -o tcgadl.exe -trimpath -ldflags "-s -w -buildid="
+```
