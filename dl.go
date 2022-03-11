@@ -112,7 +112,7 @@ func createFile(name string) (*os.File, error) {
 }
 
 func writeGzip(source io.Reader, proj, p string) {
-	err := os.MkdirAll(DlDir, os.ModePerm)
+	err := os.MkdirAll(Dir, os.ModePerm)
 	if err != nil {
 		fmt.Println("Error create directories. Check your permissions.")
 		os.Exit(1)
@@ -134,20 +134,25 @@ func writeGzip(source io.Reader, proj, p string) {
 	_ = os.Rename(p+".tmp", p)
 }
 
-func writeDecompressed(source io.Reader, proj string) {
-	err := os.MkdirAll(path.Join(DlDir, proj), os.ModePerm)
+func WriteDecompressed(source io.Reader, proj string, suppressDlMsg bool) {
+	err := os.MkdirAll(path.Join(Dir, proj), os.ModePerm)
 	if err != nil {
 		fmt.Println("Error create directories. Check your permissions.")
 		os.Exit(1)
 	}
-	fmt.Print("\n")
-	bar := progressbar.DefaultBytes(-1, "Downloading "+proj)
 
 	var buf bytes.Buffer
-	_, err = io.Copy(io.MultiWriter(&buf, bar), source)
-	if err != nil {
-		fmt.Println("Error receiving files. Check your network connection and proxy settings.")
-		os.Exit(1)
+	if !suppressDlMsg {
+		fmt.Print("\n")
+		bar := progressbar.DefaultBytes(-1, "Downloading "+proj)
+
+		_, err = io.Copy(io.MultiWriter(&buf, bar), source)
+		if err != nil {
+			fmt.Println("Error receiving files. Check your network connection and proxy settings.")
+			os.Exit(1)
+		}
+	} else {
+		_, _ = io.Copy(&buf, source)
 	}
 	fmt.Print("Decompressing...")
 	reader, err := gzip.NewReader(&buf)
@@ -166,13 +171,13 @@ func writeDecompressed(source io.Reader, proj string) {
 			fmt.Println("Error reading tar file.")
 			return
 		}
-		fileName := path.Join(DlDir, proj, header.Name)
+		fileName := path.Join(Dir, proj, header.Name)
 		target, _ := createFile(fileName)
 		defer target.Close()
 		_, err = io.Copy(target, tarReader)
 		if err != nil {
 			target.Close()
-			os.Remove(path.Join(DlDir, proj, header.Name))
+			os.Remove(path.Join(Dir, proj, header.Name))
 			fmt.Println("Error writing to file.")
 			return
 		}
@@ -181,16 +186,20 @@ func writeDecompressed(source io.Reader, proj string) {
 }
 
 func writeManifest(proj string, manifest []Manifest) {
-	_ = os.MkdirAll(path.Join(DlDir, "manifest"), os.ModePerm)
-	manifestOut, _ := os.Create(path.Join(DlDir, "manifest", proj+".csv"))
+	_ = os.MkdirAll(path.Join(Dir, "manifest"), os.ModePerm)
+	manifestOut, _ := os.Create(path.Join(Dir, "manifest", proj+".csv"))
 	defer manifestOut.Close()
 
 	manifestWriter := csv.NewWriter(manifestOut)
-	_ = manifestWriter.Write([]string{"file_id", "file_name", "TCGA_barcode", "vital_status", "days_to_death", "days_to_last_follow_up"})
+	_ = manifestWriter.Write([]string{
+		"file_id", "file_name", "md5sum", "TCGA_barcode",
+		"vital_status", "days_to_death", "days_to_last_follow_up",
+	})
 	for _, record := range manifest {
 		_ = manifestWriter.Write([]string{
 			record.FileID,
 			record.FileName,
+			record.Md5sum,
 			record.TCGA,
 			record.VitalStatus,
 			record.DaysToDeath,
@@ -215,16 +224,16 @@ func dl(fileIds []string, manifest []Manifest, proj string) {
 	// fileSize, _ := strconv.Atoi(resp.Header.Get("Content-Length"))
 	defer resp.Body.Close()
 	if DlDecompress {
-		writeDecompressed(resp.Body, proj)
+		WriteDecompressed(resp.Body, proj, false)
 	} else {
-		writeGzip(resp.Body, proj, filepath.Join(DlDir, proj+".tar.gz"))
+		writeGzip(resp.Body, proj, filepath.Join(Dir, proj+".tar.gz"))
 	}
 	writeManifest(proj, manifest)
 }
 
 func appendDl(fileIds []string, manifest []Manifest, proj string) {
 
-	_, err := os.Stat(path.Join(DlDir, proj))
+	_, err := os.Stat(path.Join(Dir, proj))
 	if err != nil && os.IsNotExist(err) {
 		dl(fileIds, manifest, proj)
 		return
@@ -234,33 +243,33 @@ func appendDl(fileIds []string, manifest []Manifest, proj string) {
 		manifestMap[record.FileID] = []string{record.Md5sum, record.FileName}
 	}
 
-	fileIdList, _ := DirList(path.Join(DlDir, proj))
+	fileIdList, _ := DirList(path.Join(Dir, proj))
 	reFiles := Difference(fileIds, fileIdList)
-	wrongCh := make(chan string)
+	dspCh := make(chan string)
 	for _, fId := range fileIdList {
 		go func(fId string, manifestMap map[string][]string) {
-			fs, _ := FileList(path.Join(DlDir, proj, fId))
+			fs, _ := FileList(path.Join(Dir, proj, fId))
 			if len(fs) == 0 {
-				wrongCh <- fId
+				dspCh <- fId
 			} else {
 				md5sum := Md5sum(fs[0])
 				if md5sum != manifestMap[fId][0] {
-					wrongCh <- fId
+					dspCh <- fId
 				} else {
-					wrongCh <- ""
+					dspCh <- ""
 				}
 			}
 		}(fId, manifestMap)
 	}
 
 	for i := 0; i < len(fileIdList); i++ {
-		wrong := <-wrongCh
-		if wrong == "" {
+		dsp := <-dspCh
+		if dsp == "" {
 			continue
 		}
-		reFiles = append(reFiles, wrong)
+		reFiles = append(reFiles, dsp)
 	}
-	close(wrongCh)
+	close(dspCh)
 
 	if len(reFiles) == 0 {
 		fmt.Println("Nothing changed. All files are already downloaded.")
@@ -283,9 +292,9 @@ func appendDl(fileIds []string, manifest []Manifest, proj string) {
 	defer resp.Body.Close()
 
 	if len(reFiles) > 1 {
-		writeDecompressed(resp.Body, proj)
+		WriteDecompressed(resp.Body, proj, false)
 	} else {
-		writeGzip(resp.Body, proj, path.Join(DlDir, proj, reFiles[0], manifestMap[reFiles[0]][1]))
+		writeGzip(resp.Body, proj, path.Join(Dir, proj, reFiles[0], manifestMap[reFiles[0]][1]))
 	}
 	writeManifest(proj, manifest)
 }

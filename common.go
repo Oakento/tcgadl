@@ -6,6 +6,7 @@ import (
 
 const DATA_EP string = "https://api.gdc.cancer.gov/data"
 const FILES_EP string = "https://api.gdc.cancer.gov/files"
+const GENE_NUM int = 60483
 
 var TCGA_PROJ = []string{
 	"TCGA-BRCA",

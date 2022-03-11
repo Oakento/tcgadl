@@ -8,22 +8,22 @@ import (
 )
 
 var HOME string = os.Getenv("HOME")
-var DlDir string
+var Dir string
+var Proxy string
 var DlDecompress bool
 var DlSkip bool
-var Proxy string
 
 func main() {
 
-	var dlProj arrayFlags
-	var dlAll bool
+	var proj arrayFlags
+	var all bool
 
 	dlCmd := flag.NewFlagSet("dl", flag.ExitOnError)
-	dlCmd.Var(&dlProj, "proj", "TCGA project name. Use tcgadl abbr to check all available TCGA projects.")
-	// dlCmd.Var(&dlProj, "p", "TCGA project name. Use tcgadl abbr to check all available TCGA projects.")
-	dlCmd.BoolVar(&dlAll, "all", false, "Download all available TCGA projects.")
+	dlCmd.Var(&proj, "proj", "TCGA project name. Use tcgadl show to check all available TCGA projects.")
+	// dlCmd.Var(&dlProj, "p", "TCGA project name. Use tcgadl show to check all available TCGA projects.")
+	dlCmd.BoolVar(&all, "all", false, "Download all available TCGA projects.")
 	// dlCmd.BoolVar(&dlAll, "o", false, "Download all available TCGA projects.")
-	dlCmd.StringVar(&DlDir, "dir", path.Join(HOME, "tcgadl"), "Downloading directory. Default: $HOME/tcgadl")
+	dlCmd.StringVar(&Dir, "dir", path.Join(HOME, "tcgadl"), "Downloading directory. Default: $HOME/tcgadl")
 	// dlCmd.StringVar(&DlDir, "d", path.Join(HOME, "tcgadl"), "Downloading directory. Default: $HOME/tcgadl")
 	dlCmd.StringVar(&Proxy, "proxy", os.Getenv("HTTP_PROXY"), "HTTP_PROXY")
 	// dlCmd.StringVar(&Proxy, "x", os.Getenv("HTTP_PROXY"), "HTTP_PROXY")
@@ -31,6 +31,11 @@ func main() {
 	// dlCmd.BoolVar(&DlDecompress, "u", false, "Decompress gzipped files.")
 	dlCmd.BoolVar(&DlSkip, "skip", false, "Skip existing files. This option will automatically set --decompress.")
 	// dlCmd.BoolVar(&DlSkip, "k", false, "Skip existing files. This option will automatically set --decompress.")
+
+	mergeCmd := flag.NewFlagSet("merge", flag.ExitOnError)
+	mergeCmd.Var(&proj, "proj", "TCGA project name. Use tcgadl show to check all available TCGA projects.")
+	mergeCmd.BoolVar(&all, "all", false, "Merge all available TCGA projects.")
+	mergeCmd.StringVar(&Dir, "dir", path.Join(HOME, "tcgadl"), "Data directory. Default: $HOME/tcgadl")
 
 	if len(os.Args) < 2 {
 		fmt.Println("Please specify a command")
@@ -40,17 +45,33 @@ func main() {
 	switch os.Args[1] {
 	case "dl":
 		dlCmd.Parse(os.Args[2:])
-		invalidProj := Difference(dlProj, TCGA_PROJ)
-		if dlAll {
-			dlProj = TCGA_PROJ
+		invalidProj := Difference(proj, TCGA_PROJ)
+		if all {
+			proj = TCGA_PROJ
 		} else if len(invalidProj) > 0 {
 			fmt.Println("Unrecognized TCGA project name:", invalidProj)
+			os.Exit(1)
+		} else if len(proj) == 0 {
+			fmt.Println("Please specify a project name. You can check all available TCGA projects by using 'tcgadl show'.")
 			os.Exit(1)
 		}
 		if DlSkip && !DlDecompress {
 			DlDecompress = true
 		}
-		HandleDl(dlProj)
+		HandleDl(proj)
+	case "merge":
+		mergeCmd.Parse(os.Args[2:])
+		invalidProj := Difference(proj, TCGA_PROJ)
+		if all {
+			proj = TCGA_PROJ
+		} else if len(invalidProj) > 0 {
+			fmt.Println("Unrecognized TCGA project name:", invalidProj)
+			os.Exit(1)
+		} else if len(proj) == 0 {
+			fmt.Println("Please specify a project name. You can check all available TCGA projects by using 'tcgadl show'.")
+			os.Exit(1)
+		}
+		HandleMerge(proj)
 	case "show":
 		fmt.Print(`=============================
 TCGA proj.	Description
