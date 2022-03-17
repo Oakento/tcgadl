@@ -38,13 +38,13 @@ func main() {
 	mergeCmd.StringVar(&Dir, "dir", path.Join(HOME, "tcgadl"), "Data directory. Default: $HOME/tcgadl")
 
 	if len(os.Args) < 2 {
-		fmt.Println("Please specify a command")
+		fmt.Printf("Please specify a command: %s, %s, %s", "dl", "merge", "show")
 		os.Exit(1)
 	}
 
 	switch os.Args[1] {
 	case "dl":
-		dlCmd.Parse(os.Args[2:])
+		_ = dlCmd.Parse(os.Args[2:])
 		invalidProj := Difference(proj, TCGA_PROJ)
 		if all {
 			proj = TCGA_PROJ
@@ -60,7 +60,7 @@ func main() {
 		}
 		HandleDl(proj)
 	case "merge":
-		mergeCmd.Parse(os.Args[2:])
+		_ = mergeCmd.Parse(os.Args[2:])
 		invalidProj := Difference(proj, TCGA_PROJ)
 		if all {
 			proj = TCGA_PROJ
@@ -111,8 +111,9 @@ TCGA-UCS	Uterine Carcinosarcoma
 TCGA-CHOL	Cholangiocarcinoma
 `)
 	default:
-		dlCmd.Parse(os.Args[2:])
+		//_ = dlCmd.Parse(os.Args[2:])
 		dlCmd.Usage()
+		mergeCmd.Usage()
 	}
 
 }

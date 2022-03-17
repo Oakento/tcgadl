@@ -43,6 +43,8 @@ tcgadl merge --proj TCGA-LUSC --dir ./tcga/
 #### subcommand `show`
 Display available TCGA projects.
 
+#### subcommand `help`
+Display help information.
 
 #### effective environment variables
 `$HTTP_PROXY` `$HOME`
