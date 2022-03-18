@@ -273,7 +273,7 @@ func appendDl(fileIds []string, manifest []Manifest, proj string) {
 
 	if len(reFiles) == 0 {
 		fmt.Println("Nothing changed. All files are already downloaded.")
-		// writeManifest(proj, manifest)
+		writeManifest(proj, manifest)
 		return
 	}
 	payload, _ := json.Marshal(url.Values{"ids": reFiles})
