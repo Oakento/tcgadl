@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"compress/gzip"
 	"encoding/csv"
 	"fmt"
 	"io/ioutil"
@@ -102,7 +101,18 @@ func checkFileValid(fileInfo []FileInfo, proj string) (bool, []string) {
 	return res, d
 }
 
-func merge(filesInfo []FileInfo, proj string) {
+func merge(filesInfo []FileInfo, proj string, qm string) {
+	var field int
+	switch qm {
+	case "TPM":
+		field = 6
+	case "FPKM":
+		field = 7
+	case "FPKM-UQ":
+		field = 8
+	default:
+		field = 3
+	}
 	// id, file_name, TCGA_Barcode, md5sum, vital_status, days_to_death, days_to_last_follow_up
 	file, err := os.Open(path.Join(Dir, proj, filesInfo[0].FileId, filesInfo[0].FileName))
 	if err != nil {
@@ -117,19 +127,25 @@ func merge(filesInfo []FileInfo, proj string) {
 		// fmt.Println("Broken gzip file:" + filesInfo[0].FileId + "/" + filesInfo[0].FileName)
 		return
 	}
+
 	lines := strings.Split(string(content), "\n")
 
-	rnaCounts := make([][]string, len(lines)-5)
+	rnaCounts := make([][]string, len(lines)-6)
 	for i := range rnaCounts {
-		rnaCounts[i] = make([]string, len(filesInfo)+1)
+		rnaCounts[i] = make([]string, len(filesInfo)+2)
 	}
-	rnaCounts[0][0] = ""
-	rnaCounts[0][1] = filesInfo[0].TCGA
-	for i, line := range lines[:len(lines)-6] {
+
+	rnaCounts[0][0] = "GENE_ID"
+	rnaCounts[0][1] = "GENE_NAME"
+	rnaCounts[0][2] = filesInfo[0].TCGA
+	for i, line := range lines[6 : len(lines)-1] {
+		// fmt.Println(line)
 		lineSplit := strings.Split(line, "\t")
 		rnaCounts[i+1][0] = lineSplit[0]
 		rnaCounts[i+1][1] = lineSplit[1]
+		rnaCounts[i+1][2] = lineSplit[field]
 	}
+
 	fileCh := make(chan *RNACounts)
 	for i, info := range filesInfo[1:] {
 		go func(info FileInfo, i int) {
@@ -140,16 +156,16 @@ func merge(filesInfo []FileInfo, proj string) {
 				return
 			}
 			defer file.Close()
-			reader, _ := gzip.NewReader(file)
-			defer reader.Close()
-			content, err := ioutil.ReadAll(reader)
+			// reader, _ := gzip.NewReader(file)
+			// defer reader.Close()
+			content, err := ioutil.ReadAll(file)
 			if err != nil {
-				fmt.Println("Broken gzip file:" + info.FileId + "/" + info.FileName)
+				// fmt.Println("Broken gzip file:" + info.FileId + "/" + info.FileName)
 				fileCh <- &RNACounts{-1, nil, ""}
 				return
 			}
 			lines := strings.Split(string(content), "\n")
-			fileCh <- &RNACounts{i, lines[:len(lines)-6], info.TCGA}
+			fileCh <- &RNACounts{i, lines[6 : len(lines)-1], info.TCGA}
 		}(info, i)
 	}
 	for i := 1; i < len(filesInfo); i++ {
@@ -159,18 +175,18 @@ func merge(filesInfo []FileInfo, proj string) {
 			fmt.Printf("Sample %s reading error, skipped.\n", cnts.Sample)
 			continue
 		}
-		rnaCounts[0][cnts.Index+2] = cnts.Sample
+		rnaCounts[0][cnts.Index+3] = cnts.Sample
 
 		for j, line := range cnts.Counts {
 			lineSplit := strings.Split(line, "\t")
-			rnaCounts[j+1][cnts.Index+2] = lineSplit[1]
+			rnaCounts[j+1][cnts.Index+3] = lineSplit[field]
 		}
 		// rnaCounts[cnts.Index] = append([]string{cnts.Sample}, cnts.Counts...)
 	}
 	close(fileCh)
 
 	_ = os.MkdirAll(path.Join(Dir, "merge"), os.ModePerm)
-	mergeOut, _ := os.Create(path.Join(Dir, "merge", proj+".csv"))
+	mergeOut, _ := os.Create(path.Join(Dir, "merge", proj+"."+qm+".csv"))
 	defer mergeOut.Close()
 
 	mergeWriter := csv.NewWriter(mergeOut)
@@ -194,7 +210,7 @@ func decompress(proj string) {
 	WriteDecompressed(bytes.NewReader(content), proj, true)
 }
 
-func HandleMerge(projects []string) {
+func HandleMerge(projects []string, qm string) {
 
 	for _, proj := range projects {
 		fileExist := checkExist(proj)
@@ -228,7 +244,7 @@ func HandleMerge(projects []string) {
 			fmt.Println("Invalid file:", dsp)
 			return
 		}
-		merge(fileInfo, proj)
+		merge(fileInfo, proj, qm)
 
 	}
 

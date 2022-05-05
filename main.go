@@ -17,6 +17,7 @@ func main() {
 
 	var proj arrayFlags
 	var all bool
+	var qm string
 
 	dlCmd := flag.NewFlagSet("dl", flag.ExitOnError)
 	dlCmd.Var(&proj, "proj", "TCGA project name. Use tcgadl show to check all available TCGA projects.")
@@ -36,6 +37,7 @@ func main() {
 	mergeCmd.Var(&proj, "proj", "TCGA project name. Use tcgadl show to check all available TCGA projects.")
 	mergeCmd.BoolVar(&all, "all", false, "Merge all available TCGA projects.")
 	mergeCmd.StringVar(&Dir, "dir", path.Join(HOME, "tcgadl"), "Data directory. Default: $HOME/tcgadl")
+	mergeCmd.StringVar(&qm, "qm", "", "Using quantification measures: TPM, FPKM, FPKM-UQ")
 
 	if len(os.Args) < 2 {
 		fmt.Printf("Please specify a command: %s, %s, %s", "dl", "merge", "show")
@@ -71,7 +73,7 @@ func main() {
 			fmt.Println("Please specify a project name. You can check all available TCGA projects by using 'tcgadl show'.")
 			os.Exit(1)
 		}
-		HandleMerge(proj)
+		HandleMerge(proj, qm)
 	case "show":
 		fmt.Print(`=============================
 TCGA proj.	Description
