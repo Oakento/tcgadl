@@ -110,11 +110,11 @@ func merge(filesInfo []FileInfo, proj string) {
 		return
 	}
 	defer file.Close()
-	reader, _ := gzip.NewReader(file)
-	defer reader.Close()
-	content, err := ioutil.ReadAll(reader)
+	// reader, _ := gzip.NewReader(file)
+	// defer reader.Close()
+	content, err := ioutil.ReadAll(file)
 	if err != nil {
-		fmt.Println("Broken gzip file:" + filesInfo[0].FileId + "/" + filesInfo[0].FileName)
+		// fmt.Println("Broken gzip file:" + filesInfo[0].FileId + "/" + filesInfo[0].FileName)
 		return
 	}
 	lines := strings.Split(string(content), "\n")
