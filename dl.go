@@ -321,7 +321,14 @@ func fetchInfo(proj string) *Metadata {
 				Op: "in",
 				Content: SubContent{
 					Field: "files.analysis.workflow_type",
-					Value: []string{"HTSeq - Counts"},
+					Value: []string{"STAR - Counts"},
+				},
+			},
+			{
+				Op: "in",
+				Content: SubContent{
+					Field: "files.access",
+					Value: []string{"open"},
 				},
 			},
 		},
